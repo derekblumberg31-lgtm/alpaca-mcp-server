@@ -13,13 +13,12 @@ from . import __version__
 
 Transport = Literal["stdio", "streamable-http", "sse"]
 
-# Older Docker/Helm configs invoked `alpaca-mcp-server serve ...`; the CLI has no subcommands.
 if len(sys.argv) > 1 and sys.argv[1] == "serve":
     sys.argv.pop(1)
 
 
 def _default_port() -> int:
-    """HTTP bind port; honors Render/Fly-style ``PORT`` when ``--port`` is omitted."""
+    """HTTP bind port; honors Render/Fly-style `PORT` when `--port` is omitted."""
     return int(os.environ.get("PORT", "8000"))
 
 
@@ -70,17 +69,16 @@ def main(transport: Transport, host: str, port: int, env_file: Optional[Path]) -
             transport=transport,
             host=host,
             port=port,
-            host_origin_protection=True,
+            host_origin_protection=False,
         )
     else:
         from fastmcp.server.http import HostOriginGuardMiddleware
         from starlette.middleware import Middleware
 
-        # FastMCP's SSE app ignores host_origin_protection; attach the same guard.
         server.run(
             transport=transport,
             host=host,
             port=port,
-            host_origin_protection=True,
-            middleware=[Middleware(HostOriginGuardMiddleware, mode="strict")],
+            host_origin_protection=False,
+            middleware=[Middleware(HostOriginGuardMiddleware, mode="permissive")],
         )
