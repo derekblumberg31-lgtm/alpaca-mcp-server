@@ -11,12 +11,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY pyproject.toml uv.lock README.md ./
 COPY src/ ./src/
-COPY .github/core/ ./.github/core/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Use the local stdio transport unless the operator explicitly configures secured HTTP.
 CMD ["alpaca-mcp-server"]
