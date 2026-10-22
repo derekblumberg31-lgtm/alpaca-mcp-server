@@ -1,0 +1,54 @@
+name: Paper account observation (inactive until secrets are approved)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "7,37 * * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: paper-account-observation
+  cancel-in-progress: false
+
+jobs:
+  observe:
+    runs-on: ubuntu-latest
+    environment: paper-observer
+    timeout-minutes: 5
+    steps:
+      - name: Check that credentials were separately approved
+        id: credentials
+        shell: bash
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+        run: |
+          if [[ -n "$ALPACA_API_KEY" && -n "$ALPACA_SECRET_KEY" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Paper credentials are not configured; no account access or order."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.credentials.outputs.ready == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.credentials.outputs.ready == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install fixed HTTP client version
+        if: steps.credentials.outputs.ready == 'true'
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check httpx==0.28.1
+      - name: Read-only paper research cycle
+        if: steps.credentials.outputs.ready == 'true'
+        shell: bash
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+          ALPACA_PAPER_TRADE: "true"
+          PYTHONPATH: src
+        run: |
+          python -m alpaca_mcp_server.paper_bot --mode observe --quiet
