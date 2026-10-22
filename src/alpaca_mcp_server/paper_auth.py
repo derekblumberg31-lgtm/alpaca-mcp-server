@@ -16,6 +16,8 @@ AUDIENCE = "https://alpaca-mcp-paper-oj7u.onrender.com/mcp"
 
 
 def main() -> None:
+    if os.environ.get("ALPACA_PAPER_TRADE", "true").lower() not in {"true", "1", "yes"}:
+        raise ValueError("this authenticated service is paper-trading only")
     server = build_server()
     server.auth = JWTVerifier(
         public_key=base64.b64decode(PUBLIC_KEY_B64),

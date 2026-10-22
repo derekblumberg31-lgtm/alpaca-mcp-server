@@ -69,16 +69,17 @@ def main(transport: Transport, host: str, port: int, env_file: Optional[Path]) -
             transport=transport,
             host=host,
             port=port,
-            host_origin_protection=False,
+            host_origin_protection=True,
         )
     else:
         from fastmcp.server.http import HostOriginGuardMiddleware
         from starlette.middleware import Middleware
 
+        # SSE ignores the FastMCP host_origin_protection flag; guard it explicitly.
         server.run(
             transport=transport,
             host=host,
             port=port,
-            host_origin_protection=False,
-            middleware=[Middleware(HostOriginGuardMiddleware, mode="permissive")],
+            host_origin_protection=True,
+            middleware=[Middleware(HostOriginGuardMiddleware, mode="strict")],
         )
