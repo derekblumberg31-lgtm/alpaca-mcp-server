@@ -1,4 +1,4 @@
-name: Paper account observation (inactive until secrets are approved)
+name: Paper account research (orders off until explicitly enabled)
 
 on:
   workflow_dispatch:
@@ -19,11 +19,15 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check that credentials were separately approved
-        id: credentials
+        id: readiness
         shell: bash
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
           ALPACA_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PAPER_BOT_FROM_EMAIL: ${{ vars.PAPER_BOT_FROM_EMAIL }}
+          PAPER_BOT_EMAIL_TO: ${{ secrets.PAPER_BOT_EMAIL_TO }}
+          PAPER_AUTO_TRADING_ENABLED: ${{ vars.PAPER_AUTO_TRADING_ENABLED }}
         run: |
           if [[ -n "$ALPACA_API_KEY" && -n "$ALPACA_SECRET_KEY" ]]; then
             echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -31,19 +35,24 @@ jobs:
             echo "Paper credentials are not configured; no account access or order."
             echo "ready=false" >> "$GITHUB_OUTPUT"
           fi
+          if [[ "$PAPER_AUTO_TRADING_ENABLED" == "true" && -n "$RESEND_API_KEY" && -n "$PAPER_BOT_FROM_EMAIL" && -n "$PAPER_BOT_EMAIL_TO" ]]; then
+            echo "trade=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "trade=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/checkout@v4
-        if: steps.credentials.outputs.ready == 'true'
+        if: steps.readiness.outputs.ready == 'true'
       - uses: actions/setup-python@v5
-        if: steps.credentials.outputs.ready == 'true'
+        if: steps.readiness.outputs.ready == 'true'
         with:
           python-version: "3.12"
       - name: Install fixed HTTP client version
-        if: steps.credentials.outputs.ready == 'true'
+        if: steps.readiness.outputs.ready == 'true'
         shell: bash
         run: |
           python -m pip install --disable-pip-version-check httpx==0.28.1
       - name: Read-only paper research cycle
-        if: steps.credentials.outputs.ready == 'true'
+        if: steps.readiness.outputs.ready == 'true' && steps.readiness.outputs.trade != 'true'
         shell: bash
         env:
           ALPACA_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
@@ -52,3 +61,16 @@ jobs:
           PYTHONPATH: src
         run: |
           python -m alpaca_mcp_server.paper_bot --mode observe --quiet
+      - name: Bounded paper trade cycle with email reporting
+        if: steps.readiness.outputs.ready == 'true' && steps.readiness.outputs.trade == 'true'
+        shell: bash
+        env:
+          ALPACA_API_KEY: ${{ secrets.ALPACA_PAPER_API_KEY }}
+          ALPACA_SECRET_KEY: ${{ secrets.ALPACA_PAPER_SECRET_KEY }}
+          ALPACA_PAPER_TRADE: "true"
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          PAPER_BOT_FROM_EMAIL: ${{ vars.PAPER_BOT_FROM_EMAIL }}
+          PAPER_BOT_EMAIL_TO: ${{ secrets.PAPER_BOT_EMAIL_TO }}
+          PYTHONPATH: src
+        run: |
+          python -m alpaca_mcp_server.paper_bot --mode trade --quiet
