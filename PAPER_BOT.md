@@ -14,8 +14,8 @@ also sleeps, and no paid plan has been authorized.
 
 ## Activation, only after separate credential approval
 
-1. Publish the reviewed code to the fork's default branch and enable Actions
-   for that fork if GitHub asks. Neither step has happened yet.
+1. The observer code and workflow are published to the fork's default branch.
+   Enable Actions for that fork if GitHub asks.
 2. The GitHub Actions environment `paper-observer` has been created and
    restricted to `main`. The owner still needs to enter
    `ALPACA_PAPER_API_KEY` and `ALPACA_PAPER_SECRET_KEY` as **environment
