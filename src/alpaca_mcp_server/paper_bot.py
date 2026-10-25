@@ -1,6 +1,7 @@
 """One-shot, paper-only portfolio observer and optional order runner.
 
-The free scheduled workflow invokes this once per run in ``observe`` mode.
+The free scheduled workflow invokes observe mode until the owner explicitly
+enables trading and configures a working email reporting route.
 No broker credentials are stored in this repository. Broker state, rather
 than a runner's temporary filesystem, is the source of truth.
 """
@@ -229,12 +230,37 @@ class EmailReporter:
                 f"Cash at check time: ${account.get('cash')}\n")
         self._send(f"paper-drawdown-{now:%Y%m%d}", "Paper bot paused: major loss", body)
 
+    def report_pretrade(self, account: dict, order: dict) -> None:
+        """An accepted email API request is required before each paper order."""
+        client_id = str(order["client_order_id"])
+        body = ("Alpaca PAPER order planned; submission has not happened yet.\n"
+                f"Client order: {client_id}\nSymbol: {order['symbol']}\n"
+                f"Side: {order['side']}\nNotional: ${order['notional']}\n"
+                f"Account equity: ${account.get('equity')}\n"
+                f"Cash: ${account.get('cash')}\n")
+        self._send(f"paper-pretrade-{client_id}",
+                   f"Paper order planned: {order['side']} {order['symbol']}", body)
+
+    def report_order_accepted(self, account: dict, order: dict, placed: dict) -> None:
+        order_id = str(placed.get("id", ""))
+        if not order_id:
+            raise ValueError("broker accepted order without an id")
+        body = (f"Alpaca PAPER order accepted; fill not yet confirmed.\n"
+                f"Broker order: {order_id}\nSymbol: {order['symbol']}\n"
+                f"Side: {order['side']}\nRequested notional: ${order['notional']}\n"
+                f"Account equity before order: ${account.get('equity')}\n"
+                "Fill quantity, executed dollars and P/L will be reported after a fill.\n")
+        self._send(f"paper-accepted-{order_id}",
+                   f"Paper order accepted: {order['side']} {order['symbol']}", body)
+
 
 def run_cycle(api: PaperAPI, mode: str, now: datetime | None = None,
               reporter: EmailReporter | None = None) -> dict:
     now = (now or datetime.now(NY)).astimezone(NY)
     if mode not in {"observe", "trade"}:
         raise ValueError("bot mode must be observe or trade")
+    if mode == "trade" and reporter is None:
+        raise ValueError("trade mode requires a configured email reporter")
     account = api.get("/v2/account")
     positions = api.get("/v2/positions")
     orders = api.get("/v2/orders", params={"status": "all", "limit": 500,
@@ -248,6 +274,9 @@ def run_cycle(api: PaperAPI, mode: str, now: datetime | None = None,
     history = api.get("/v2/account/portfolio/history",
                       params={"period": "1M", "timeframe": "1D"})
     equity_history = [dec(v) for v in history.get("equity", []) if v is not None and dec(v) > 0]
+    if not equity_history:
+        result["reason"] = "portfolio history unavailable; no order"
+        return result
     peak = max(equity_history + [dec(account["equity"])])
     drawdown = float(dec(account["equity"]) / peak - 1)
     result["drawdown_1m"] = round(drawdown, 4)
@@ -302,9 +331,11 @@ def run_cycle(api: PaperAPI, mode: str, now: datetime | None = None,
     if fresh != order:
         result["reason"] = "broker state changed before submission"
         return result
+    reporter.report_pretrade(fresh_account, order)
     placed = api.submit(order)
     result["submitted"] = True
     result["broker_order_id"] = placed.get("id")
+    reporter.report_order_accepted(fresh_account, order, placed)
     result["reason"] = "paper order accepted; fill not yet confirmed"
     return result
 
@@ -341,7 +372,7 @@ def main() -> None:
     args = parser.parse_args()
     result = run_from_environment(args.mode)
     if args.quiet:
-        print("Paper account observation completed; no account details printed")
+        print(f"Paper account {args.mode} cycle completed; no account details printed")
     else:
         print(json.dumps(result, sort_keys=True))
 
