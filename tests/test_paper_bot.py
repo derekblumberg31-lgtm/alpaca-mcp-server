@@ -86,6 +86,29 @@ class FakeAPI:
         return {"id": "paper-id"}
 
 
+class FakeReporter:
+    def __init__(self, fail_pretrade=False):
+        self.events = []
+        self.fail_pretrade = fail_pretrade
+
+    def report_fills(self, orders, account):
+        self.events.append("fills")
+
+    def report_balance(self, account, now):
+        self.events.append("balance")
+
+    def report_drawdown(self, account, drawdown, now):
+        self.events.append("drawdown")
+
+    def report_pretrade(self, account, order):
+        self.events.append("pretrade")
+        if self.fail_pretrade:
+            raise httpx.HTTPStatusError("email rejected", request=None, response=None)
+
+    def report_order_accepted(self, account, order, placed):
+        self.events.append("accepted")
+
+
 def test_observe_never_submits_even_with_signal():
     api = FakeAPI()
     with patch("alpaca_mcp_server.paper_bot.compute_signal", side_effect=lambda s, *_: signal(s)):
@@ -96,16 +119,34 @@ def test_observe_never_submits_even_with_signal():
 
 def test_trade_revalidates_and_submits_exactly_one_paper_order():
     api = FakeAPI()
+    reporter = FakeReporter()
     with patch("alpaca_mcp_server.paper_bot.compute_signal", side_effect=lambda s, *_: signal(s)):
-        result = run_cycle(api, "trade", NOW)
+        result = run_cycle(api, "trade", NOW, reporter=reporter)
     assert result["submitted"] is True
     assert len(api.submitted) == 1
     assert api.submitted[0]["type"] == "market"
+    assert reporter.events[-2:] == ["pretrade", "accepted"]
+
+
+def test_email_failure_prevents_paper_order():
+    api = FakeAPI()
+    reporter = FakeReporter(fail_pretrade=True)
+    with patch("alpaca_mcp_server.paper_bot.compute_signal", side_effect=lambda s, *_: signal(s)):
+        with pytest.raises(httpx.HTTPStatusError, match="email rejected"):
+            run_cycle(api, "trade", NOW, reporter=reporter)
+    assert not api.submitted
+
+
+def test_trade_without_reporter_refuses_before_broker_access():
+    api = FakeAPI()
+    with pytest.raises(ValueError, match="email reporter"):
+        run_cycle(api, "trade", NOW)
+    assert not api.submitted
 
 
 def test_ten_percent_drawdown_pauses_trading():
     api = FakeAPI(drawdown=True)
-    result = run_cycle(api, "trade", NOW)
+    result = run_cycle(api, "trade", NOW, reporter=FakeReporter())
     assert result["submitted"] is False
     assert "drawdown" in result["reason"]
     assert not api.submitted
