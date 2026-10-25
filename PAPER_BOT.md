@@ -1,10 +1,11 @@
 # No-cost paper account observer
 
-The prepared GitHub Actions workflow runs a **read-only** paper-account research
-cycle every 30 minutes at :07 and :37 UTC. It does not place orders, move money,
-or send messages to Codex. It remains inactive until the owner separately
-approves adding paper-account credentials as GitHub Actions secrets. No
-credentials belong in the repository or its logs.
+The GitHub Actions workflow runs a paper-account research cycle every 30 minutes
+at :07 and :37 UTC. It stays **read-only** until the owner supplies paper keys,
+configures a verified email route, and explicitly sets
+`PAPER_AUTO_TRADING_ENABLED=true`. Even then it can submit at most one bounded
+paper buy per run; it never uses a live-trading endpoint. It cannot send
+messages to Codex. No credentials belong in the repository or its logs.
 
 GitHub's standard runner is free for public repositories, but scheduled runs
 can be delayed or dropped, and schedules in public repositories stop after
@@ -22,15 +23,36 @@ also sleeps, and no paid plan has been authorized.
    secrets**, not repository secrets. This limits the keys to jobs that
    reference that environment. Do not put the values in chat, code,
    workflow files, variables, or logs.
-3. Trigger `Paper account observation` once manually and confirm that the
-   workflow succeeds without exposing account details in the public log.
+3. Trigger the workflow once manually in observation mode and confirm it
+   succeeds without exposing account details in the public log.
 
-The workflow invokes `python -m alpaca_mcp_server.paper_bot --mode observe
---quiet`. The module has a separate trade implementation, but the workflow
-hard-codes observation mode. Automatic orders are **not enabled**. The
-one-shot trade mode refuses to run without a verified reporting channel;
-in-chat delivery is not currently available from GitHub Actions. The user
-chose in-chat updates, so no email service is configured.
+## Free email reporting and paper-order enablement
+
+Resend currently has a free tier of 3,000 transactional emails per month,
+subject to its limits. The owner must create or sign into a Resend account,
+configure a sender that Resend permits to reach the intended recipient, and
+create a **sending-only** API key. A verified domain may be necessary; the
+`resend.dev` testing sender has recipient restrictions. Do not enable trading
+until a test email reaches the intended inbox. The owner should enter these in
+the `paper-observer` GitHub Actions environment:
+
+- Environment secrets: `RESEND_API_KEY` and `PAPER_BOT_EMAIL_TO`, in addition
+  to the two Alpaca paper secrets above.
+- Environment variable: `PAPER_BOT_FROM_EMAIL`, using the authorized sender.
+- Environment variable: `PAPER_AUTO_TRADING_ENABLED` remains unset or `false`
+  until the email test and a read-only account check both succeed. The owner
+  must set it to `true` to authorize unattended paper orders. Set it back to
+  `false` to stop future orders; cancel any existing open order separately.
+
+The bot requires an accepted email API request **before** each paper order.
+It then reports order acceptance, fills on the next scheduled check, and a
+daily balance. Failed reporting blocks new orders. Email delivery and GitHub
+schedule timing are not guaranteed; check both systems regularly. Resend will
+process the balance and trade details contained in these messages.
+
+The workflow invokes `--mode observe` by default. Only when the explicit
+enable variable and all reporting settings are present does it invoke
+`--mode trade`. In-chat delivery is unavailable from GitHub Actions.
 
 ## Pilot rules, for review only
 
@@ -40,11 +62,11 @@ completed IEX daily bars, 50- and 200-day averages, 63-session momentum,
 skips missing research, unexpected holdings, open orders, non-market hours,
 and a one-month equity drawdown of at least 10%. Potential buys use cash,
 not margin, keep a 20% cash floor, and cap a position at 40% of equity.
-The prototype only proposes buys, not sells or day trades, and cannot
-guarantee a profit. Its read-only scheduled cycle does not execute proposals.
+The prototype only considers buys, not sells or day trades, and cannot
+guarantee a profit. Its default read-only cycle does not execute proposals.
 
 The existing Codex chat monitor can report while the local app is able to
 run, but it is not an always-available cloud messaging endpoint. A chat word
 is not a remote kill switch for an independent process. To stop future
-scheduled observations, disable this workflow in GitHub Actions; because
-the workflow is read-only, there are no autonomous orders to stop.
+orders, set `PAPER_AUTO_TRADING_ENABLED=false` in GitHub or disable the workflow.
+Neither action cancels an order already accepted by Alpaca.
